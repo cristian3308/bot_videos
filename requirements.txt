@@ -1,0 +1,22 @@
+# ===== Núcleo de generación de video =====
+edge-tts>=6.1.9          # Voz neuronal gratuita (Microsoft)
+playwright>=1.40.0       # Navegador headless para grabar las escenas HTML
+
+# ===== Interfaz web =====
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+jinja2>=3.1.0
+python-multipart>=0.0.9  # Formularios / subida de archivos en FastAPI
+python-dotenv>=1.0.0     # Carga de .env (API keys)
+requests>=2.31.0
+
+# ===== Subida automática a cuentas =====
+google-api-python-client>=2.120.0
+google-auth-oauthlib>=1.2.0
+google-auth-httplib2>=0.2.0
+
+# NOTA: FFmpeg NO es un paquete de pip. Instálalo aparte:
+#   Windows:  winget install Gyan.FFmpeg
+#   Linux:    sudo apt install -y ffmpeg
+# Después de instalar playwright ejecuta también:
+#   python -m playwright install chromium

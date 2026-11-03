@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cybercrime Studio · Panel</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="cyber-grid"></div>
+
+<header class="topbar">
+    <div class="brand">
+        <span class="logo">&#9608;</span>
+        <div>
+            <h1>CYBERCRIME STUDIO</h1>
+            <p>Panel profesional · Shorts / TikTok · 1080×1920</p>
+        </div>
+    </div>
+    <div id="status-chips" class="chips"></div>
+</header>
+
+<nav class="tabs">
+    <button class="tab active" data-tab="crear">⚙ Crear</button>
+    <button class="tab" data-tab="automatizar">🤖 Automatizar</button>
+    <button class="tab" data-tab="biblioteca">🎞 Biblioteca</button>
+</nav>
+
+<!-- ============ TAB CREAR ============ -->
+<main id="tab-crear" class="grid">
+    <!-- Config -->
+    <section class="card">
+        <h2>Configuración</h2>
+
+        <div class="two">
+            <div>
+                <label>Proveedor</label>
+                <select id="provider">
+                    <option value="opencode">OpenCode Go</option>
+                    <option value="gemini">Gemini</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="ollama">Ollama (local)</option>
+                    <option value="demo">Demo (sin IA)</option>
+                </select>
+            </div>
+            <div>
+                <label>Modelo <button class="mini" id="btn-models" title="Recargar modelos">⟳</button></label>
+                <select id="model"><option value="">(por defecto)</option></select>
+            </div>
+        </div>
+
+        <div class="two">
+            <div>
+                <label>Idioma</label>
+                <select id="lang"><option value="es">Español</option><option value="en">English</option></select>
+            </div>
+            <div>
+                <label>Tema de color</label>
+                <select id="theme"></select>
+            </div>
+        </div>
+
+        <label>Estilo (cómo lo explica y se ve)</label>
+        <select id="style">
+            <option value="auto">Automático (según el caso)</option>
+            <option value="investigacion">🔎 Investigación</option>
+            <option value="alerta">🚨 Alerta / Breaking</option>
+            <option value="didactico">🎓 Didáctico</option>
+            <option value="documental">🎬 Documental</option>
+            <option value="misterio">🕵️ Misterio</option>
+        </select>
+
+        <label class="chk"><input type="checkbox" id="branding" checked> Intro / outro de marca automáticos</label>
+
+        <label>Voz <button class="mini" id="btn-voice-play" title="Escuchar muestra">▶ Escuchar</button></label>
+        <select id="voice"></select>
+        <audio id="voice-audio" style="display:none"></audio>
+
+        <div class="two">
+            <div>
+                <label>Velocidad: <span id="rate-val">+8%</span></label>
+                <input type="range" id="rate" min="-30" max="40" value="8">
+            </div>
+            <div>
+                <label>Tono: <span id="pitch-val">-2Hz</span></label>
+                <input type="range" id="pitch" min="-30" max="30" value="-2">
+            </div>
+        </div>
+
+        <div class="two">
+            <div>
+                <label>Nº de escenas</label>
+                <input type="number" id="num_scenes" min="3" max="10" placeholder="auto (6-8)">
+            </div>
+            <div>
+                <label>Duración (seg)</label>
+                <input type="number" id="target_seconds" min="30" max="180" placeholder="auto (~70)">
+            </div>
+        </div>
+
+        <details class="adv">
+            <summary>🎵 Música y logo (opcional)</summary>
+            <label>Mood de música (si no subes archivo propio)</label>
+            <select id="music_mood">
+                <option value="dark">Dark (oscuro)</option>
+                <option value="tense">Tense (tensión)</option>
+                <option value="action">Action (acción)</option>
+                <option value="suspense">Suspense</option>
+            </select>
+            <label>Música de fondo propia (con ducking automático)</label>
+            <input type="file" id="music" accept="audio/*">
+            <small id="music-name" class="hint"></small>
+            <label>Logo (PNG, esquina superior)</label>
+            <input type="file" id="logo" accept="image/png,image/*">
+            <small id="logo-name" class="hint"></small>
+        </details>
+
+        <details class="adv">
+            <summary>📺 Serie "Parte 2"</summary>
+            <label>Continuar a partir de un video anterior</label>
+            <select id="previous_project"><option value="">(ninguno — video nuevo)</option></select>
+            <label>Número de parte</label>
+            <input type="number" id="part" min="2" max="20" value="2">
+        </details>
+
+        <label>Tema o caso (vacío = noticia real / continuación)</label>
+        <textarea id="topic" rows="3" placeholder="Ej: El ataque a SolarWinds explicado paso a paso..."></textarea>
+
+        <button class="primary" id="btn-script">1 · GENERAR GUION</button>
+    </section>
+
+    <!-- Guion + Resultado -->
+    <section class="card">
+        <h2>Guion <span id="script-title" class="hint"></span></h2>
+        <div id="script-box" class="hidden">
+            <textarea id="plan-json" rows="12" class="mono" spellcheck="false"></textarea>
+            <div class="row">
+                <button class="ghost" id="btn-regen">⟳ Regenerar</button>
+                <button class="ghost" id="btn-preview-scene">👁 Previsualizar escena 1</button>
+            </div>
+            <div class="row">
+                <button class="primary sm" id="btn-render">2 · RENDERIZAR VIDEO ▶</button>
+            </div>
+            <video id="scene-preview" controls playsinline class="hidden" style="width:100%;max-height:300px;border-radius:10px;margin-top:10px;background:#000"></video>
+        </div>
+        <p id="script-empty" class="hint">Genera el guion a la izquierda; aquí podrás editarlo antes de renderizar.</p>
+
+        <div class="progress-wrap">
+            <div class="bar"><div id="bar-fill"></div></div><span id="pct">0%</span>
+        </div>
+        <pre id="log" class="log"></pre>
+
+        <div id="result" class="result hidden">
+            <video id="preview" controls playsinline></video>
+            <div class="row">
+                <a id="r-download" class="ghost" download>⬇ Video</a>
+                <a id="r-thumb-yt" class="ghost sm" target="_blank">🖼 Miniatura YT</a>
+                <button class="ghost sm" id="btn-yt-upload" disabled>▶ YouTube</button>
+                <button class="ghost sm" id="btn-tt-upload" disabled>♪ TikTok</button>
+            </div>
+            <div id="upload-msg" class="hint"></div>
+        </div>
+    </section>
+</main>
+
+<!-- ============ TAB BIBLIOTECA ============ -->
+<main id="tab-biblioteca" class="library hidden">
+    <div class="lib-head">
+        <h2>Biblioteca de videos</h2>
+        <div class="account-bar">
+            <button class="ghost sm" id="btn-yt-connect">Conectar YouTube</button>
+            <button class="ghost sm" id="btn-tt-connect">Conectar TikTok</button>
+        </div>
+    </div>
+    <div id="lib-grid" class="lib-grid"></div>
+    <p id="lib-empty" class="hint">Aún no hay videos. Crea el primero en la pestaña "Crear".</p>
+</main>
+
+<!-- ============ TAB AUTOMATIZAR ============ -->
+<main id="tab-automatizar" class="grid hidden">
+    <section class="card">
+        <h2>⚡ Generar en lote</h2>
+        <p class="hint">Crea varios videos seguidos usando la configuración de la pestaña "Crear" (voz, tema, modelo, mood...).</p>
+        <div class="two">
+            <div>
+                <label>Cuántos videos</label>
+                <input type="number" id="batch_count" min="1" max="20" value="3">
+            </div>
+            <div>
+                <label>Origen de los temas</label>
+                <select id="batch_source">
+                    <option value="news">Noticias reales del día</option>
+                    <option value="bank">Mi banco de temas</option>
+                </select>
+            </div>
+        </div>
+        <button class="primary" id="btn-batch">▶ GENERAR LOTE</button>
+        <div class="progress-wrap"><div class="bar"><div id="batch-fill"></div></div><span id="batch-pct">0%</span></div>
+        <pre id="batch-log" class="log"></pre>
+    </section>
+
+    <section class="card">
+        <h2>📋 Banco de temas</h2>
+        <div class="row">
+            <input type="text" id="topic-new" placeholder="Ej: El hackeo a Sony Pictures de 2014">
+            <button class="ghost" id="btn-topic-add">+ Añadir</button>
+        </div>
+        <ul id="topic-list" class="topic-list"></ul>
+
+        <h2 style="margin-top:28px">⏰ Programador diario</h2>
+        <label class="chk"><input type="checkbox" id="sch_enabled"> Generar automáticamente cada día</label>
+        <div class="two">
+            <div><label>Hora</label><input type="number" id="sch_hour" min="0" max="23" value="9"></div>
+            <div><label>Minuto</label><input type="number" id="sch_minute" min="0" max="59" value="0"></div>
+        </div>
+        <div class="two">
+            <div><label>Videos por día</label><input type="number" id="sch_count" min="1" max="10" value="1"></div>
+            <div><label>Origen</label><select id="sch_source"><option value="news">Noticias</option><option value="bank">Banco de temas</option></select></div>
+        </div>
+        <button class="primary sm" id="btn-sch-save" style="margin-top:14px">Guardar programación</button>
+        <p class="hint">El programador funciona mientras el panel (run.py) esté abierto. Para 24/7, usa el Dockerfile.</p>
+    </section>
+</main>
+
+<footer class="foot">
+    <span>API keys en <code>.env</code> · Motor: <a href="https://opencode.ai" target="_blank">OpenCode Go</a></span>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
