@@ -125,6 +125,7 @@ class ScriptRequest(BaseModel):
     previous_project: Optional[str] = None
     part: Optional[int] = 2
     style: Optional[str] = "auto"
+    hook: Optional[str] = "auto"
 
 
 class RenderRequest(BaseModel):
@@ -139,6 +140,8 @@ class RenderRequest(BaseModel):
     branding: bool = True
     part: Optional[int] = None
     music_mood: str = "dark"
+    aspect_ratio: str = "9:16"
+    sfx: bool = True
 
 
 class BatchRequest(BaseModel):
@@ -154,6 +157,9 @@ class BatchRequest(BaseModel):
     music_mood: str = "dark"
     branding: bool = True
     style: str = "auto"
+    hook: str = "auto"
+    aspect_ratio: str = "9:16"
+    sfx: bool = True
     auto_upload_youtube: bool = False
     auto_upload_tiktok: bool = False
 
@@ -264,7 +270,7 @@ async def script_generate(req: ScriptRequest):
     try:
         plan = await asyncio.to_thread(
             generate_plan, req.topic, req.lang, req.provider, req.model,
-            req.num_scenes, req.target_seconds, previous, True, req.style,
+            req.num_scenes, req.target_seconds, previous, True, req.style, None, req.hook,
         )
         return {"plan": plan}
     except Exception as exc:  # noqa: BLE001
@@ -298,6 +304,7 @@ async def render(req: RenderRequest):
                 voice=req.voice, rate=req.rate, pitch=req.pitch, theme=req.theme,
                 music_path=music_path, logo_path=logo_path,
                 branding=req.branding, series_part=req.part, music_mood=req.music_mood,
+                aspect_ratio=req.aspect_ratio, sfx=req.sfx,
             )
             job["result"], job["status"] = result, "done"
             await job["queue"].put({"pct": 100, "stage": "done", "message": "FIN", "result": result})
@@ -472,6 +479,7 @@ async def batch(req: BatchRequest):
                 count=req.count, source=req.source, lang=req.lang, provider=req.provider,
                 model=req.model, theme=req.theme, voice=req.voice, rate=req.rate, pitch=req.pitch,
                 music_mood=req.music_mood, branding=req.branding, style=req.style,
+                hook=req.hook, aspect_ratio=req.aspect_ratio, sfx=req.sfx,
                 auto_upload_youtube=req.auto_upload_youtube, auto_upload_tiktok=req.auto_upload_tiktok,
                 progress=progress,
             )
@@ -515,12 +523,13 @@ async def scene_preview(payload: Dict[str, Any]):
     """Renderiza SOLO una escena (sin audio, ~4.5s) para previsualizar su aspecto."""
     scene = payload.get("scene") or {}
     theme = payload.get("theme") or "verde"
+    aspect_ratio = payload.get("aspect_ratio") or "9:16"
     html_file = PREVIEWS_DIR / f"scene_prev_{uuid.uuid4().hex[:8]}.html"
     mp4_file = PREVIEWS_DIR / f"scene_prev_{uuid.uuid4().hex[:8]}.mp4"
     try:
-        html_doc = generate_scene_html(scene, total_scenes=1, theme=theme)
+        html_doc = generate_scene_html(scene, total_scenes=1, theme=theme, aspect_ratio=aspect_ratio)
         html_file.write_text(html_doc, encoding="utf-8")
-        await render_scene_video_playwright(html_file, 4.5, mp4_file)
+        await render_scene_video_playwright(html_file, 4.5, mp4_file, aspect_ratio=aspect_ratio)
         _cleanup_files(html_file)
         return FileResponse(str(mp4_file), media_type="video/mp4", background=BackgroundTask(_cleanup_files, mp4_file))
     except Exception as exc:  # noqa: BLE001

@@ -37,6 +37,9 @@ async def _loop() -> None:
                             music_mood=cfg.get("music_mood", "dark"),
                             branding=bool(cfg.get("branding", True)),
                             style=cfg.get("style", "auto"),
+                            hook=cfg.get("hook", "auto"),
+                            aspect_ratio=cfg.get("aspect_ratio", "9:16"),
+                            sfx=bool(cfg.get("sfx", True)),
                             auto_upload_youtube=bool(cfg.get("auto_upload_youtube", False)),
                             auto_upload_tiktok=bool(cfg.get("auto_upload_tiktok", False)),
                         )

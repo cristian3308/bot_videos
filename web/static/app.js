@@ -267,6 +267,7 @@ async function genScript() {
         previous_project: $("previous_project").value || null,
         part: +$("part").value || 2,
         style: $("style").value,
+        hook: $("hook").value,
     };
     try {
         const r = await (await fetch("/api/script/generate", {
@@ -308,6 +309,8 @@ $("btn-render").onclick = async () => {
         logo_id: $("logo-saved").value || logoId,
         music_mood: $("music_mood").value,
         branding: $("branding").checked, part: +$("part").value || null,
+        aspect_ratio: $("aspect_ratio").value,
+        sfx: $("sfx").checked,
     };
     const r = await (await fetch("/api/render", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -342,7 +345,7 @@ window.previewSceneIdx = async (idx) => {
     try {
         const r = await fetch("/api/scene/preview", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ scene, theme: $("theme").value }),
+            body: JSON.stringify({ scene, theme: $("theme").value, aspect_ratio: $("aspect_ratio").value }),
         });
         if (!r.ok) throw new Error((await r.json()).error || "error");
         const blob = await r.blob();
@@ -450,6 +453,7 @@ $("btn-batch").onclick = async () => {
         lang: $("lang").value, provider: $("provider").value, model: $("model").value || null,
         theme: $("theme").value, voice: $("voice").value, rate: rateStr(), pitch: pitchStr(),
         music_mood: $("music_mood").value, branding: $("branding").checked, style: $("style").value,
+        hook: $("hook").value, aspect_ratio: $("aspect_ratio").value, sfx: $("sfx").checked,
         auto_upload_youtube: $("batch_auto_yt").checked,
         auto_upload_tiktok: $("batch_auto_tt").checked,
     };
@@ -498,6 +502,7 @@ $("btn-sch-save").onclick = async () => {
         count: +$("sch_count").value, source: $("sch_source").value,
         lang: $("lang").value, provider: $("provider").value, model: $("model").value, theme: $("theme").value,
         voice: $("voice").value, music_mood: $("music_mood").value, branding: $("branding").checked,
+        style: $("style").value, hook: $("hook").value, aspect_ratio: $("aspect_ratio").value, sfx: $("sfx").checked,
         auto_upload_youtube: $("sch_auto_yt").checked, auto_upload_tiktok: $("sch_auto_tt").checked,
     };
     await fetch("/api/scheduler", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cfg) });
@@ -505,11 +510,12 @@ $("btn-sch-save").onclick = async () => {
 };
 
 // ---------- Presets (recordar última config) ----------
-const CFG_FIELDS = ["provider", "model", "lang", "theme", "voice", "rate", "pitch", "num_scenes", "target_seconds", "music_mood", "style", "music-saved", "logo-saved"];
+const CFG_FIELDS = ["provider", "model", "lang", "theme", "voice", "rate", "pitch", "num_scenes", "target_seconds", "music_mood", "style", "hook", "aspect_ratio", "music-saved", "logo-saved"];
 function saveCfg() {
     try {
         const cfg = {}; CFG_FIELDS.forEach(f => { if ($(f)) cfg[f] = $(f).value; });
         cfg.branding = $("branding").checked;
+        cfg.sfx = $("sfx").checked;
         localStorage.setItem("cs_cfg", JSON.stringify(cfg));
     } catch (e) { /* storage no disponible */ }
 }
@@ -518,12 +524,13 @@ function loadCfg() {
         const cfg = JSON.parse(localStorage.getItem("cs_cfg") || "{}");
         CFG_FIELDS.forEach(f => { if (cfg[f] != null && $(f)) $(f).value = cfg[f]; });
         if (cfg.branding != null) $("branding").checked = cfg.branding;
+        if (cfg.sfx != null) $("sfx").checked = cfg.sfx;
         $("rate-val").textContent = rateStr(); $("pitch-val").textContent = pitchStr();
         musicId = $("music-saved").value || null;
         logoId = $("logo-saved").value || null;
     } catch (e) { /* ignore */ }
 }
-[...CFG_FIELDS, "branding"]
+[...CFG_FIELDS, "branding", "sfx"]
     .forEach(id => { const el = $(id); if (el) el.addEventListener("change", saveCfg); });
 
 // ---------- Init ----------

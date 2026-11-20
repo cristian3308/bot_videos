@@ -60,3 +60,56 @@ def resolve(style: Optional[str], topic: Optional[str] = None, index: Optional[i
         style = pick_style(topic, index)
     data = STYLES.get(style, STYLES["investigacion"])
     return style, data
+
+
+# ---------------------------------------------------------------------------
+# Plantillas de Hooks virales para los primeros 3 segundos (Escena 1)
+# ---------------------------------------------------------------------------
+HOOKS: Dict[str, Dict[str, str]] = {
+    "auto": {
+        "label": "Automático (el LLM elige)",
+        "instruction": "",
+    },
+    "cifra": {
+        "label": "💰 Cifra de impacto",
+        "instruction": (
+            "HOOK OBLIGATORIO (Escena 1): Empieza los primeros 3 segundos con una CIFRA BRUTAL "
+            "(dinero robado, millones de víctimas o segundos que tardó el ataque) antes de explicar el contexto."
+        ),
+    },
+    "paradoja": {
+        "label": "🤯 Paradoja técnica",
+        "instruction": (
+            "HOOK OBLIGATORIO (Escena 1): Abre con una PARADOJA o contraste imposible "
+            "(ej. 'Gastaron 100 millones en ciberseguridad... y cayeron por un archivo de 2 kilobytes')."
+        ),
+    },
+    "error_fatal": {
+        "label": "💥 Un solo error",
+        "instruction": (
+            "HOOK OBLIGATORIO (Escena 1): Abre señalando el ÚNICO error humano o de configuración "
+            "que desencadenó todo el desastre (ej. 'Un permiso olvidado en un servidor destruyó...')."
+        ),
+    },
+    "cuenta_regresiva": {
+        "label": "⏱ Cuenta regresiva",
+        "instruction": (
+            "HOOK OBLIGATORIO (Escena 1): Abre en el segundo exacto del incidente con sensación "
+            "de reloj corriendo (ej. '3:14 AM. En menos de 17 segundos, todos los servidores quedaron cifrados...')."
+        ),
+    },
+    "pregunta": {
+        "label": "❓ Pregunta directa",
+        "instruction": (
+            "HOOK OBLIGATORIO (Escena 1): Abre con una pregunta directa e inquietante al espectador "
+            "que solo se responde viendo el caso completo (ej. '¿Cómo robas 500 millones sin disparar una sola alerta?')."
+        ),
+    },
+}
+
+
+def resolve_hook(hook: Optional[str]) -> str:
+    """Devuelve la instrucción de prompt para el hook viral elegido."""
+    key = (hook or "auto").strip().lower()
+    return (HOOKS.get(key) or HOOKS["auto"])["instruction"]
+

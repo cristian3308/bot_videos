@@ -34,10 +34,19 @@ def main() -> None:
     parser.add_argument("--provider", default=settings.llm_provider,
                         choices=["opencode", "gemini", "openai", "ollama", "demo"],
                         help="Motor de guion")
+    parser.add_argument("--format", dest="aspect_ratio", default="9:16", choices=["9:16", "16:9"],
+                        help="Formato de video: 9:16 (Shorts/TikTok) o 16:9 (YouTube horizontal)")
+    parser.add_argument("--hook", default="auto",
+                        choices=["auto", "cifra", "paradoja", "error_fatal", "cuenta_regresiva", "pregunta"],
+                        help="Plantilla de gancho viral para los primeros 3 segundos")
+    parser.add_argument("--no-sfx", action="store_true", help="Desactivar efectos de sonido (SFX)")
     args = parser.parse_args()
 
     _fix_windows_event_loop()
-    result = asyncio.run(run_pipeline(topic=args.topic, lang=args.lang, provider=args.provider))
+    result = asyncio.run(run_pipeline(
+        topic=args.topic, lang=args.lang, provider=args.provider,
+        aspect_ratio=args.aspect_ratio, sfx=not args.no_sfx, hook=args.hook,
+    ))
 
     print("\n[OK] ¡Video completado!")
     print(f"     MP4       : {result['mp4']}")

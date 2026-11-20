@@ -31,6 +31,9 @@ DEFAULT_SCHED: Dict[str, Any] = {
     "music_mood": "dark",
     "branding": True,
     "style": "auto",
+    "hook": "auto",
+    "aspect_ratio": "9:16",
+    "sfx": True,
     "auto_upload_youtube": False,
     "auto_upload_tiktok": False,
     "last_run": "",        # fecha YYYY-MM-DD del último lanzamiento

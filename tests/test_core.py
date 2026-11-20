@@ -174,5 +174,51 @@ class TestWebSecurity(unittest.TestCase):
         self.assertEqual(web_app._part_num("Video único"), 1)
 
 
+class TestSFXAndWidescreenHooks(unittest.TestCase):
+    def test_sfx_track_generates_valid_wav(self):
+        import wave
+        from core import sfx
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wav_path = Path(tmp) / "sfx.wav"
+            scenes = [
+                {"scene_type": "terminal", "duration": 2.0},
+                {"scene_type": "stat", "duration": 1.5},
+                {"scene_type": "map", "duration": 1.5},
+                {"scene_type": "evidence", "duration": 1.0},
+            ]
+            sfx.build_sfx_track(scenes, wav_path)
+            self.assertTrue(wav_path.exists())
+            with wave.open(str(wav_path), "rb") as wf:
+                self.assertEqual(wf.getnchannels(), 1)
+                self.assertEqual(wf.getframerate(), sfx.SAMPLE_RATE)
+                self.assertGreaterEqual(wf.getnframes(), int(6.0 * sfx.SAMPLE_RATE))
+
+    def test_widescreen_16_9_html_and_subtitles(self):
+        doc = render.generate_scene_html(
+            {"id": 1, "scene_type": "diagram", "headline": "16:9 TEST", "diagram_nodes": ["A", "B", "C"]},
+            total_scenes=3, aspect_ratio="16:9",
+        )
+        self.assertIn("width:1920px; height:1080px;", doc)
+        self.assertIn("flex-direction: row", doc)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ass_path = Path(tmp) / "wide.ass"
+            subtitles.build_dynamic_ass_subtitles(
+                [{"duration": 3.0, "narration": "Prueba horizontal"}], ass_path, theme="verde", aspect_ratio="16:9"
+            )
+            content = ass_path.read_text(encoding="utf-8")
+            self.assertIn("PlayResX: 1920", content)
+            self.assertIn("PlayResY: 1080", content)
+
+    def test_viral_hooks(self):
+        from core import styles
+
+        self.assertEqual(styles.resolve_hook("auto"), "")
+        for hk in ("cifra", "paradoja", "error_fatal", "cuenta_regresiva", "pregunta"):
+            instr = styles.resolve_hook(hk)
+            self.assertIn("HOOK OBLIGATORIO", instr)
+
+
 if __name__ == "__main__":
     unittest.main()

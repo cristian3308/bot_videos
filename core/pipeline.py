@@ -84,18 +84,22 @@ def generate_plan(
     raise_on_error: bool = False,
     style: Optional[str] = None,
     style_index: Optional[int] = None,
+    hook: Optional[str] = "auto",
 ) -> Dict[str, Any]:
-    """Genera solo el guion (JSON) aplicando el estilo (tono + tema + mood sugeridos)."""
-    from core.styles import resolve
+    """Genera solo el guion (JSON) aplicando el estilo (tono + tema + mood) y el hook viral."""
+    from core.styles import resolve, resolve_hook
     style_name, s = resolve(style, topic, style_index)
+    hook_instr = resolve_hook(hook)
     plan = generate_script(
         topic=topic, lang=lang, provider=provider, model=model,
         num_scenes=num_scenes, target_seconds=target_seconds, previous=previous,
-        raise_on_error=raise_on_error, tone=s["tone"],
+        raise_on_error=raise_on_error, tone=s["tone"], hook_instruction=hook_instr,
     )
     plan["_style"] = style_name
     plan["_theme"] = s["theme"]
     plan["_mood"] = s["mood"]
+    if hook and hook != "auto":
+        plan["_hook"] = hook
     return plan
 
 
@@ -116,6 +120,8 @@ async def render_plan(
     branding: bool = True,
     series_part: Optional[int] = None,
     music_mood: str = "dark",
+    aspect_ratio: str = "9:16",
+    sfx: bool = True,
 ) -> Dict[str, Any]:
     """Renderiza el video a partir de un plan (guion) ya generado o editado."""
     if not settings.ffmpeg_ready():
@@ -129,6 +135,7 @@ async def render_plan(
 
     # Trabajar sobre una copia para no mutar el dict original del llamador
     plan_copy: Dict[str, Any] = json.loads(json.dumps(video_plan))
+    plan_copy["_aspect_ratio"] = aspect_ratio
     plan_path = project_dir / "video_plan.json"
     plan_path.write_text(json.dumps(plan_copy, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -182,7 +189,10 @@ async def render_plan(
         html_file = work_dir / f"scene_{i:02d}.html"
         video_file = work_dir / f"scene_{i:02d}.mp4"
         html_file.write_text(
-            generate_scene_html(scene, total_scenes=total, theme=theme, prog_start=prog_start, prog_end=prog_end),
+            generate_scene_html(
+                scene, total_scenes=total, theme=theme,
+                prog_start=prog_start, prog_end=prog_end, aspect_ratio=aspect_ratio,
+            ),
             encoding="utf-8",
         )
         scene_jobs.append((i, scene, html_file, video_file, dur))
@@ -200,7 +210,9 @@ async def render_plan(
             async def _render_one(idx: int, sc: Dict[str, Any], hfile: Path, vfile: Path, dur: float) -> Path:
                 nonlocal rendered_done
                 async with render_sem:
-                    await render_scene_video_playwright(hfile, dur, vfile, browser=browser)
+                    await render_scene_video_playwright(
+                        hfile, dur, vfile, browser=browser, aspect_ratio=aspect_ratio
+                    )
                     rendered_done += 1
                     await _emit(
                         progress,
@@ -210,7 +222,10 @@ async def render_plan(
                     )
                 return vfile
 
-            await _emit(progress, 35, "escena", f"Grabando {total} escenas (concurrencia: {settings.render_concurrency})...")
+            await _emit(
+                progress, 35, "escena",
+                f"Grabando {total} escenas en {aspect_ratio} (concurrencia: {settings.render_concurrency})...",
+            )
             scene_videos: List[Path] = list(
                 await asyncio.gather(*[_render_one(*job) for job in scene_jobs])
             )
@@ -225,15 +240,23 @@ async def render_plan(
 
     await _emit(progress, 85, "subtitulos", "Generando subtítulos karaoke .ASS sincronizados...")
     ass_file = work_dir / "subtitles.ass"
-    build_dynamic_ass_subtitles(scenes, ass_file, theme=theme)
+    build_dynamic_ass_subtitles(scenes, ass_file, theme=theme, aspect_ratio=aspect_ratio)
 
-    await _emit(progress, 89, "ensamblaje", "Ensamblando MP4 final con FFmpeg (loudnorm -14 LUFS)...")
+    sfx_file: Optional[Path] = None
+    if sfx:
+        await _emit(progress, 87, "sfx", "Sintetizando efectos de sonido (SFX) por escena...")
+        from core.sfx import build_sfx_track
+        sfx_file = await asyncio.to_thread(build_sfx_track, scenes, work_dir / "sfx_track.wav")
+
+    await _emit(progress, 90, "ensamblaje", "Ensamblando MP4 final con FFmpeg (loudnorm -14 LUFS)...")
     final_mp4 = project_dir / "video_final.mp4"
     await asyncio.to_thread(
         assemble_final_video, scene_videos, scene_audios, ass_file, final_mp4, work_dir,
         Path(music_path) if music_path else None,
         Path(logo_path) if logo_path else None,
         music_mood,
+        None,
+        sfx_file,
     )
 
     # Miniatura para la biblioteca (fotograma)
@@ -244,6 +267,7 @@ async def render_plan(
     meta_txt.write_text(
         f"TÍTULO:\n{plan_copy.get('title')}\n\n"
         f"DESCRIPCIÓN:\n{plan_copy.get('description')}\n\n"
+        f"FORMATO: {aspect_ratio}\n\n"
         "CHECKLIST DE SUBIDA (YOUTUBE / TIKTOK):\n"
         "- Marcar 'Contenido alterado o sintético' solo si usas rostros realistas.\n"
         "- Duración > 60s para TikTok Creator Rewards y YouTube Shorts.\n",
@@ -270,6 +294,7 @@ async def render_plan(
         "project": project_dir.name,
         "title": plan_copy.get("title", ""),
         "description": plan_copy.get("description", ""),
+        "aspect_ratio": aspect_ratio,
     }
 
 
@@ -295,10 +320,13 @@ async def run_pipeline(
     branding: bool = True,
     style: Optional[str] = "auto",
     music_mood: Optional[str] = None,
+    aspect_ratio: str = "9:16",
+    sfx: bool = True,
+    hook: Optional[str] = "auto",
 ) -> Dict[str, Any]:
     await _emit(progress, 5, "guion", f"Generando guion con proveedor '{provider or settings.llm_provider}'...")
     plan = await asyncio.to_thread(
-        generate_plan, topic, lang, provider, model, num_scenes, target_seconds, previous, False, style
+        generate_plan, topic, lang, provider, model, num_scenes, target_seconds, previous, False, style, None, hook
     )
     await _emit(progress, 10, "guion", f"Título: {plan.get('title')}")
     return await render_plan(
@@ -308,4 +336,5 @@ async def run_pipeline(
         music_path=music_path, logo_path=logo_path, branding=branding,
         series_part=(previous or {}).get("part") if previous else None,
         music_mood=music_mood or plan.get("_mood", "dark"),
+        aspect_ratio=aspect_ratio, sfx=sfx,
     )

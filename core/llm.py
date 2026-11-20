@@ -145,6 +145,7 @@ def _build_user_prompt(
     target_seconds: Optional[int] = None,
     previous: Optional[Dict[str, Any]] = None,
     tone: Optional[str] = None,
+    hook_instruction: Optional[str] = None,
 ) -> str:
     voice_default = settings.default_voice(lang)
     if not topic and not previous:
@@ -189,6 +190,8 @@ def _build_user_prompt(
         prompt += "Requisitos adicionales:\n" + "\n".join(extra) + "\n"
     if tone:
         prompt += f"ESTILO DE NARRACIÓN: {tone}\n"
+    if hook_instruction:
+        prompt += f"{hook_instruction}\n"
     prompt += "\nGenera el JSON siguiendo exactamente la estructura indicada."
     return prompt
 
@@ -282,6 +285,7 @@ def generate_script(
     previous: Optional[Dict[str, Any]] = None,
     raise_on_error: bool = False,
     tone: Optional[str] = None,
+    hook_instruction: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Genera el plan del video en JSON.
@@ -293,7 +297,7 @@ def generate_script(
         return _demo_plan(lang)
 
     try:
-        user_prompt = _build_user_prompt(topic, lang, num_scenes, target_seconds, previous, tone)
+        user_prompt = _build_user_prompt(topic, lang, num_scenes, target_seconds, previous, tone, hook_instruction)
         if provider == "opencode":
             if not settings.opencode_api_key:
                 raise RuntimeError("Falta OPENCODE_API_KEY en el .env")

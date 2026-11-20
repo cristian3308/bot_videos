@@ -60,17 +60,41 @@
             </div>
         </div>
 
-        <label>Estilo (cómo lo explica y se ve)</label>
-        <select id="style">
-            <option value="auto">Automático (según el caso)</option>
-            <option value="investigacion">🔎 Investigación</option>
-            <option value="alerta">🚨 Alerta / Breaking</option>
-            <option value="didactico">🎓 Didáctico</option>
-            <option value="documental">🎬 Documental</option>
-            <option value="misterio">🕵️ Misterio</option>
+        <div class="two">
+            <div>
+                <label>Estilo (cómo lo explica)</label>
+                <select id="style">
+                    <option value="auto">Automático (según el caso)</option>
+                    <option value="investigacion">🔎 Investigación</option>
+                    <option value="alerta">🚨 Alerta / Breaking</option>
+                    <option value="didactico">🎓 Didáctico</option>
+                    <option value="documental">🎬 Documental</option>
+                    <option value="misterio">🕵️ Misterio</option>
+                </select>
+            </div>
+            <div>
+                <label>Hook viral (primeros 3s)</label>
+                <select id="hook">
+                    <option value="auto">Automático</option>
+                    <option value="cifra">💰 Cifra de impacto</option>
+                    <option value="paradoja">🤯 Paradoja técnica</option>
+                    <option value="error_fatal">💥 Un solo error</option>
+                    <option value="cuenta_regresiva">⏱ Cuenta regresiva</option>
+                    <option value="pregunta">❓ Pregunta directa</option>
+                </select>
+            </div>
+        </div>
+
+        <label>Formato de video</label>
+        <select id="aspect_ratio">
+            <option value="9:16">📱 Vertical 9:16 (1080×1920 · Shorts / TikTok)</option>
+            <option value="16:9">🖥 Horizontal 16:9 (1920×1080 · YouTube largo)</option>
         </select>
 
-        <label class="chk"><input type="checkbox" id="branding" checked> Intro / outro de marca automáticos</label>
+        <div class="row">
+            <label class="chk"><input type="checkbox" id="branding" checked> Intro / outro de marca</label>
+            <label class="chk"><input type="checkbox" id="sfx" checked> Efectos de sonido (SFX)</label>
+        </div>
 
         <label>Voz <button class="mini" id="btn-voice-play" title="Escuchar muestra">▶ Escuchar</button></label>
         <select id="voice"></select>

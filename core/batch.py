@@ -35,6 +35,9 @@ async def run_batch(
     music_mood: str = "dark",
     branding: bool = True,
     style: Optional[str] = "auto",
+    hook: Optional[str] = "auto",
+    aspect_ratio: str = "9:16",
+    sfx: bool = True,
     auto_upload_youtube: bool = False,
     auto_upload_tiktok: bool = False,
     progress: ProgressCB = None,
@@ -77,13 +80,14 @@ async def run_batch(
         try:
             await _emit(progress, lo, "lote", f"Video {idx}/{total}: generando guion...")
             plan = await asyncio.to_thread(
-                generate_plan, topic, lang, provider, model, None, None, None, False, style, idx - 1
+                generate_plan, topic, lang, provider, model, None, None, None, False, style, idx - 1, hook
             )
             v_theme = plan.get("_theme", theme)
             v_mood = plan.get("_mood", music_mood)
             res = await render_plan(
                 plan, lang=lang, progress=sub_progress, voice=voice, rate=rate, pitch=pitch,
                 theme=v_theme, music_mood=v_mood, branding=branding,
+                aspect_ratio=aspect_ratio, sfx=sfx,
             )
 
             # Marcar tema como usado para no repetirlo en próximos lotes

@@ -140,15 +140,28 @@ def _center_content(scene: Dict[str, Any]) -> str:
     </div>"""
 
 
+ASPECT_RATIOS: Dict[str, tuple[int, int]] = {
+    "9:16": (1080, 1920),
+    "16:9": (1920, 1080),
+}
+
+
+def get_resolution(aspect_ratio: Optional[str] = None) -> tuple[int, int]:
+    return ASPECT_RATIOS.get((aspect_ratio or "9:16").strip(), (1080, 1920))
+
+
 def generate_scene_html(
     scene: Dict[str, Any],
     total_scenes: int,
     theme: Optional[str] = None,
     prog_start: float = 0.0,
     prog_end: float = 1.0,
+    aspect_ratio: str = "9:16",
 ) -> str:
-    """Genera una página HTML5/CSS3/JS animada a 1080x1920 para la escena (con Ken-Burns y barra de progreso)."""
+    """Genera una página HTML5/CSS3/JS animada a 1080x1920 (9:16) o 1920x1080 (16:9)."""
     t = get_theme(theme)
+    width, height = get_resolution(aspect_ratio)
+    is_wide = width > height
     scene_id = int(scene.get("id", 1) or 1)
     headline = _esc(scene.get("headline", "ANÁLISIS FORENSE"))
     badge = _esc(scene.get("badge", "CYBERSECURITY INTEL"))
@@ -157,6 +170,31 @@ def generate_scene_html(
     dur = float(scene.get("duration", 5.0)) or 5.0
     ps = max(0.0, min(1.0, prog_start)) * 100
     pe = max(0.0, min(1.0, prog_end)) * 100
+    wide_css = ""
+    if is_wide:
+        wide_css = """
+        .hud-wrapper { padding: 52px 96px 130px; gap: 28px; }
+        .top-bar { padding-bottom: 16px; }
+        .badge { font-size: 24px; padding: 8px 20px; }
+        .scene-counter { font-size: 24px; }
+        .headline { font-size: 56px; padding-left: 24px; }
+        .terminal-window { min-height: 430px; }
+        .terminal-body { padding: 28px 34px; font-size: 32px; line-height: 1.5; }
+        .diagram-container { flex-direction: row; align-items: stretch; gap: 18px; margin-top: 24px; }
+        .node-card { flex: 1; padding: 30px 26px; display: flex; flex-direction: column; justify-content: center; }
+        .node-title { font-size: 34px; }
+        .arrow-connector { display: flex; align-items: center; font-size: 22px; }
+        .arrow-connector span { writing-mode: horizontal-tb; }
+        .map-stage { min-height: 460px; }
+        .stat-value { font-size: 168px; }
+        .stat-label { font-size: 40px; margin-top: 18px; max-width: 1300px; }
+        .code-box { font-size: 32px; padding: 26px; }
+        .tl-row { margin-bottom: 22px; }
+        .tl-text { font-size: 34px; }
+        .brand-ring { width: 220px; height: 220px; }
+        .brand-sub { font-size: 44px; margin-top: 28px; }
+        """
+
     extra_css = (
         ".bgzoom{position:absolute;inset:0;z-index:0;"
         "background:radial-gradient(circle at 50% 35%,#0c192c,#050811 70%,#020307);"
@@ -177,7 +215,7 @@ def generate_scene_html(
     :root {{ --p:{t['p']}; --p-rgb:{t['p_rgb']}; --a:{t['a']}; --a-rgb:{t['a_rgb']}; --d:{t['d']}; --d-rgb:{t['d_rgb']}; }}
     {extra_css}
     * {{ box-sizing:border-box; margin:0; padding:0; }}
-    body {{ width:1080px; height:1920px; overflow:hidden; color:#e2f1ff; position:relative;
+    body {{ width:{width}px; height:{height}px; overflow:hidden; color:#e2f1ff; position:relative;
         background:radial-gradient(circle at 50% 35%, #0c192c 0%, #050811 70%, #020307 100%);
         font-family:'Courier New',Consolas,monospace; }}
     .cyber-grid {{ position:absolute; inset:0; z-index:1;
@@ -246,6 +284,7 @@ def generate_scene_html(
     .brand-ring {{ width:360px; height:360px; border:8px solid var(--p); border-top-color:transparent; border-radius:50%; animation:spin 3s linear infinite; box-shadow:0 0 50px rgba(var(--p-rgb),.4); }}
     @keyframes spin {{ 100% {{ transform:rotate(360deg); }} }}
     .brand-sub {{ font-family:Arial,sans-serif; font-size:52px; font-weight:800; color:#fff; margin-top:46px; max-width:880px; text-shadow:0 0 25px rgba(var(--p-rgb),.4); }}
+    {wide_css}
 </style></head>
 <body>
     {extra_body}
@@ -258,11 +297,18 @@ def generate_scene_html(
 </body></html>"""
 
 
-async def _record_with_browser(browser: Any, html_path: Path, duration_sec: float, temp_video_dir: Path) -> None:
+async def _record_with_browser(
+    browser: Any,
+    html_path: Path,
+    duration_sec: float,
+    temp_video_dir: Path,
+    width: int = 1080,
+    height: int = 1920,
+) -> None:
     context = await browser.new_context(
-        viewport={"width": 1080, "height": 1920},
+        viewport={"width": width, "height": height},
         record_video_dir=str(temp_video_dir),
-        record_video_size={"width": 1080, "height": 1920},
+        record_video_size={"width": width, "height": height},
     )
     try:
         page = await context.new_page()
@@ -277,24 +323,26 @@ async def render_scene_video_playwright(
     duration_sec: float,
     out_mp4: Path,
     browser: Any = None,
+    aspect_ratio: str = "9:16",
 ) -> None:
     """
     Graba la animación HTML en Chromium headless y la normaliza a MP4 30fps con FFmpeg.
     Si se pasa `browser`, lo reutiliza en lugar de lanzar una nueva instancia por escena.
     """
+    width, height = get_resolution(aspect_ratio)
     temp_video_dir = out_mp4.parent / f"pw_tmp_{out_mp4.stem}"
     temp_video_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         if browser is not None:
-            await _record_with_browser(browser, html_path, duration_sec, temp_video_dir)
+            await _record_with_browser(browser, html_path, duration_sec, temp_video_dir, width, height)
         else:
             from playwright.async_api import async_playwright
 
             async with async_playwright() as p:
                 owned_browser = await p.chromium.launch(headless=True)
                 try:
-                    await _record_with_browser(owned_browser, html_path, duration_sec, temp_video_dir)
+                    await _record_with_browser(owned_browser, html_path, duration_sec, temp_video_dir, width, height)
                 finally:
                     await owned_browser.close()
 
@@ -303,7 +351,7 @@ async def render_scene_video_playwright(
             raise RuntimeError(f"Playwright no generó el video para {html_path.name}")
 
         fade_out = max(0.0, duration_sec - 0.35)
-        vf = (f"fps=30,scale=1080:1920,format=yuv420p,"
+        vf = (f"fps=30,scale={width}:{height},format=yuv420p,"
               f"fade=t=in:st=0:d=0.3,fade=t=out:st={fade_out:.2f}:d=0.35")
         cmd = [
             settings.ffmpeg or "ffmpeg", "-y", "-i", str(recorded_files[0]),

@@ -53,11 +53,12 @@ def assemble_final_video(
     logo_path: Optional[Path] = None,
     music_mood: str = "dark",
     loudnorm: Optional[bool] = None,
+    sfx_path: Optional[Path] = None,
 ) -> None:
     """
     Une clips de video/voz, añade música de fondo (archivo propio con DUCKING, o ambiente
-    procedural según el mood), normaliza el audio (loudnorm -14 LUFS), quema subtítulos .ASS
-    y superpone un logo opcional.
+    procedural según el mood), mezcla efectos de sonido (SFX) opcionales, normaliza el audio
+    (loudnorm -14 LUFS), quema subtítulos .ASS y superpone un logo opcional.
     """
     use_loudnorm = settings.audio_loudnorm if loudnorm is None else loudnorm
 
@@ -87,6 +88,12 @@ def assemble_final_video(
     music_idx = idx
     idx += 1
 
+    sfx_idx = None
+    if sfx_path and Path(sfx_path).exists():
+        inputs += ["-i", str(sfx_path)]
+        sfx_idx = idx
+        idx += 1
+
     logo_idx = None
     if logo_path and Path(logo_path).exists():
         inputs += ["-i", str(logo_path)]
@@ -97,17 +104,24 @@ def assemble_final_video(
 
     if use_file_music:
         # DUCKING: la música baja automáticamente cuando hay narración (sidechaincompress).
-        audio_filter = (
+        base_audio = (
             f"[1:a]volume=1.0,asplit=2[v1][v2];"
             f"[{music_idx}:a]volume=0.5[mraw];"
             f"[mraw][v2]sidechaincompress=threshold=0.02:ratio=10:attack=15:release=400[mduck];"
-            f"[v1][mduck]amix=inputs=2:duration=first:dropout_transition=0{norm_chain}[aout]"
+        )
+        mix_inputs = "[v1][mduck]"
+    else:
+        base_audio = f"[1:a]volume=1.0[voice];[{music_idx}:a]lowpass=f=280[bg];"
+        mix_inputs = "[voice][bg]"
+
+    if sfx_idx is not None:
+        audio_filter = (
+            f"{base_audio}"
+            f"[{sfx_idx}:a]volume=0.55[sfx];"
+            f"{mix_inputs}[sfx]amix=inputs=3:duration=first:dropout_transition=0{norm_chain}[aout]"
         )
     else:
-        audio_filter = (
-            f"[1:a]volume=1.0[voice];[{music_idx}:a]lowpass=f=280[bg];"
-            f"[voice][bg]amix=inputs=2:duration=first:dropout_transition=0{norm_chain}[aout]"
-        )
+        audio_filter = f"{base_audio}{mix_inputs}amix=inputs=2:duration=first:dropout_transition=0{norm_chain}[aout]"
 
     if logo_idx is not None:
         video_filter = (

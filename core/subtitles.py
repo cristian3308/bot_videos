@@ -16,19 +16,23 @@ THEME_ASS_COLORS: Dict[str, str] = {
 }
 
 
-def _ass_header(theme: Optional[str] = None) -> str:
+def _ass_header(theme: Optional[str] = None, aspect_ratio: str = "9:16") -> str:
     primary = THEME_ASS_COLORS.get((theme or "verde").lower(), THEME_ASS_COLORS["verde"])
+    if aspect_ratio == "16:9":
+        play_x, play_y, font_size, margin_v = 1920, 1080, 62, 95
+    else:
+        play_x, play_y, font_size, margin_v = 1080, 1920, 66, 370
     # PrimaryColour = color de palabra YA dicha (resaltada), SecondaryColour = aún no dicha (blanco).
     return f"""[Script Info]
 ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
+PlayResX: {play_x}
+PlayResY: {play_y}
 WrapStyle: 0
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: CyberSub,Arial,66,{primary},&H00FFFFFF,&H00080808,&H80000000,-1,0,0,0,100,100,1,0,1,5,3,2,70,70,370,1
+Style: CyberSub,Arial,{font_size},{primary},&H00FFFFFF,&H00080808,&H80000000,-1,0,0,0,100,100,1,0,1,5,3,2,70,70,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -137,6 +141,7 @@ def build_dynamic_ass_subtitles(
     scenes: List[Dict[str, Any]],
     ass_path: Path,
     theme: Optional[str] = None,
+    aspect_ratio: str = "9:16",
 ) -> None:
     """
     Subtítulos .ASS con efecto karaoke: bloques de ~4 palabras donde cada palabra
@@ -156,4 +161,4 @@ def build_dynamic_ass_subtitles(
                 events.extend(_build_scene_events_proportional(words, current_time, duration))
         current_time += duration
 
-    ass_path.write_text(_ass_header(theme) + "\n".join(events) + "\n", encoding="utf-8")
+    ass_path.write_text(_ass_header(theme, aspect_ratio) + "\n".join(events) + "\n", encoding="utf-8")
