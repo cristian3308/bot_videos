@@ -32,6 +32,21 @@ def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
 
 
+def _env_bool(key: str, default: bool) -> bool:
+    raw = _env(key)
+    if not raw:
+        return default
+    return raw.lower() in ("1", "true", "yes", "on", "si", "sí")
+
+
+def _env_int(key: str, default: int, lo: int = 1, hi: int = 64) -> int:
+    try:
+        val = int(_env(key) or default)
+    except ValueError:
+        val = default
+    return max(lo, min(hi, val))
+
+
 def _resolve_ffmpeg(name: str, override_dir: str) -> Optional[str]:
     """Busca ffmpeg/ffprobe en una ruta configurada o en el PATH del sistema."""
     exe = name + (".exe" if os.name == "nt" else "")
@@ -72,6 +87,11 @@ class Settings:
     ollama_base_url: str = field(default_factory=lambda: _env("OLLAMA_BASE_URL", "http://localhost:11434"))
     ollama_model: str = field(default_factory=lambda: _env("OLLAMA_MODEL", "llama3.1"))
 
+    # --- Identidad del canal ---
+    brand_name: str = field(default_factory=lambda: _env("BRAND_NAME", "DÍA CERO"))
+    brand_tagline_es: str = field(default_factory=lambda: _env("BRAND_TAGLINE_ES", "Caso real de ciberseguridad"))
+    brand_tagline_en: str = field(default_factory=lambda: _env("BRAND_TAGLINE_EN", "Real cybersecurity case"))
+
     # --- YouTube ---
     youtube_client_secret_file: str = field(default_factory=lambda: _env("YOUTUBE_CLIENT_SECRET_FILE", "credentials/youtube_client_secret.json"))
     youtube_token_file: str = field(default_factory=lambda: _env("YOUTUBE_TOKEN_FILE", "credentials/youtube_token.json"))
@@ -86,6 +106,11 @@ class Settings:
     lang: str = field(default_factory=lambda: _env("VIDEO_LANG", "es"))
     voice_es: str = field(default_factory=lambda: _env("VIDEO_VOICE_ES", "es-CO-GonzaloNeural"))
     voice_en: str = field(default_factory=lambda: _env("VIDEO_VOICE_EN", "en-US-ChristopherNeural"))
+
+    # --- Rendimiento y audio ---
+    render_concurrency: int = field(default_factory=lambda: _env_int("RENDER_CONCURRENCY", 2, lo=1, hi=4))
+    audio_loudnorm: bool = field(default_factory=lambda: _env_bool("AUDIO_LOUDNORM", True))
+    keep_temp_files: bool = field(default_factory=lambda: _env_bool("KEEP_TEMP_FILES", False))
 
     web_host: str = field(default_factory=lambda: _env("WEB_HOST", "127.0.0.1"))
     web_port: int = field(default_factory=lambda: int(_env("WEB_PORT", "8000") or 8000))

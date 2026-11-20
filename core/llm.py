@@ -65,6 +65,79 @@ def _clean_json(raw_text: str) -> Dict[str, Any]:
         raise
 
 
+_VALID_SCENE_TYPES = {"terminal", "diagram", "evidence", "map", "stat", "timeline", "brand"}
+
+
+def validate_and_normalize_plan(plan: Any, lang: str = "es") -> Dict[str, Any]:
+    """Valida y normaliza el JSON devuelto por el LLM para evitar fallos en TTS/render."""
+    if not isinstance(plan, dict):
+        raise ValueError("El LLM no devolvió un objeto JSON válido.")
+
+    raw_scenes = plan.get("scenes")
+    if not isinstance(raw_scenes, list) or not raw_scenes:
+        raise ValueError("El guion devuelto por el LLM no contiene escenas.")
+
+    title = str(plan.get("title") or "Caso de Ciberseguridad").strip()[:100]
+    description = str(plan.get("description") or title).strip()
+
+    normalized_scenes: List[Dict[str, Any]] = []
+    for idx, raw in enumerate(raw_scenes, start=1):
+        if not isinstance(raw, dict):
+            continue
+        stype = str(raw.get("scene_type") or "evidence").strip().lower()
+        if stype not in _VALID_SCENE_TYPES:
+            stype = "evidence"
+
+        headline = str(raw.get("headline") or f"ESCENA {idx}").strip()
+        narration = str(raw.get("narration") or "").strip() or headline
+        badge = str(raw.get("badge") or "CYBERSECURITY INTEL").strip()
+
+        t_lines = raw.get("terminal_lines")
+        if isinstance(t_lines, str):
+            t_lines = [line.strip() for line in t_lines.splitlines() if line.strip()]
+        elif not isinstance(t_lines, list):
+            t_lines = []
+        else:
+            t_lines = [str(x).strip() for x in t_lines if str(x).strip()]
+
+        d_nodes = raw.get("diagram_nodes")
+        if isinstance(d_nodes, str):
+            d_nodes = [n.strip() for n in d_nodes.split(",") if n.strip()]
+        elif not isinstance(d_nodes, list):
+            d_nodes = []
+        else:
+            d_nodes = [str(x).strip() for x in d_nodes if str(x).strip()]
+
+        scene_clean: Dict[str, Any] = {
+            "id": idx,
+            "scene_type": stype,
+            "narration": narration,
+            "headline": headline,
+            "badge": badge,
+            "terminal_lines": t_lines,
+            "diagram_nodes": d_nodes,
+            "code_snippet": str(raw.get("code_snippet") or ""),
+        }
+        if raw.get("stat_value") is not None:
+            scene_clean["stat_value"] = str(raw.get("stat_value"))
+        if raw.get("stat_label") is not None:
+            scene_clean["stat_label"] = str(raw.get("stat_label"))
+        if raw.get("subtitle") is not None:
+            scene_clean["subtitle"] = str(raw.get("subtitle"))
+        normalized_scenes.append(scene_clean)
+
+    if not normalized_scenes:
+        raise ValueError("Ninguna escena del guion tiene formato válido.")
+
+    out = dict(plan)
+    out["title"] = title
+    out["description"] = description
+    out["language"] = str(plan.get("language") or lang)
+    out["voice"] = str(plan.get("voice") or settings.default_voice(lang))
+    out["scenes"] = normalized_scenes
+    return out
+
+
 def _build_user_prompt(
     topic: Optional[str],
     lang: str,
@@ -236,6 +309,7 @@ def generate_script(
                         settings.opencode_base_url, settings.opencode_api_key, m, user_prompt,
                         extra_headers=_opencode_headers(settings.opencode_api_key),
                     )
+                    plan = validate_and_normalize_plan(plan, lang)
                     plan["_model_used"] = m
                     return plan
                 except Exception as e:  # noqa: BLE001
@@ -245,16 +319,17 @@ def generate_script(
         if provider == "openai":
             if not settings.openai_api_key:
                 raise RuntimeError("Falta OPENAI_API_KEY en el .env")
-            return _generate_openai_compatible(
+            plan = _generate_openai_compatible(
                 settings.openai_base_url, settings.openai_api_key,
                 model or settings.openai_model, user_prompt,
             )
+            return validate_and_normalize_plan(plan, lang)
         if provider == "gemini":
             if not settings.gemini_api_key:
                 raise RuntimeError("Falta GEMINI_API_KEY en el .env")
-            return _generate_gemini(user_prompt, model or settings.gemini_model)
+            return validate_and_normalize_plan(_generate_gemini(user_prompt, model or settings.gemini_model), lang)
         if provider == "ollama":
-            return _generate_ollama(user_prompt, model or settings.ollama_model)
+            return validate_and_normalize_plan(_generate_ollama(user_prompt, model or settings.ollama_model), lang)
         return _demo_plan(lang)
     except Exception as exc:  # noqa: BLE001
         if raise_on_error:

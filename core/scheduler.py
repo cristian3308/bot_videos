@@ -20,9 +20,9 @@ async def _loop() -> None:
             if cfg.get("enabled"):
                 now = datetime.now()
                 today = now.strftime("%Y-%m-%d")
-                if (now.hour == int(cfg.get("hour", 9))
-                        and now.minute == int(cfg.get("minute", 0))
-                        and cfg.get("last_run") != today):
+                target_h = int(cfg.get("hour", 9))
+                target_m = int(cfg.get("minute", 0))
+                if (now.hour, now.minute) >= (target_h, target_m) and cfg.get("last_run") != today:
                     save_sched({"last_run": today})
                     print(f"[SCHED] Lanzando lote programado de {cfg.get('count')} video(s)...")
                     try:
@@ -37,6 +37,8 @@ async def _loop() -> None:
                             music_mood=cfg.get("music_mood", "dark"),
                             branding=bool(cfg.get("branding", True)),
                             style=cfg.get("style", "auto"),
+                            auto_upload_youtube=bool(cfg.get("auto_upload_youtube", False)),
+                            auto_upload_tiktok=bool(cfg.get("auto_upload_tiktok", False)),
                         )
                         print("[SCHED] Lote programado completado.")
                     except Exception as exc:  # noqa: BLE001

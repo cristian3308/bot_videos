@@ -3,6 +3,8 @@
 """Motor visual 'Dark Tech': genera cada escena en HTML (tema de color + tipos de escena) y la graba con Playwright."""
 from __future__ import annotations
 
+import asyncio
+import html
 import json
 import shutil
 import subprocess
@@ -28,8 +30,12 @@ def get_theme(name: Optional[str]) -> Dict[str, str]:
     return THEMES.get((name or "verde").lower(), THEMES["verde"])
 
 
+def _esc(value: Any) -> str:
+    return html.escape(str(value or ""), quote=True)
+
+
 def _center_content(scene: Dict[str, Any]) -> str:
-    """Devuelve el HTML central según el tipo de escena."""
+    """Devuelve el HTML central según el tipo de escena (con escape HTML seguro)."""
     scene_type = scene.get("scene_type", "terminal")
     terminal_lines = scene.get("terminal_lines") or [
         "$ analyzing packet capture...",
@@ -40,7 +46,8 @@ def _center_content(scene: Dict[str, Any]) -> str:
     code_snippet = scene.get("code_snippet") or "// Inspección de vulnerabilidad crítica\nSTATUS: COMPROMISED"
 
     if scene_type == "terminal":
-        lines_json = json.dumps(terminal_lines, ensure_ascii=False)
+        # Evita que una línea con `</script>` rompa el bloque JS inline.
+        lines_json = json.dumps([str(x) for x in terminal_lines], ensure_ascii=False).replace("</", "<\\/")
         return f"""
         <div class="terminal-window">
             <div class="terminal-bar">
@@ -76,21 +83,21 @@ def _center_content(scene: Dict[str, Any]) -> str:
             nodes_html += f"""
             <div class="node-card" style="animation-delay: {delay}s">
                 <div class="node-step">FASE 0{i + 1}</div>
-                <div class="node-title">{node}</div>
+                <div class="node-title">{_esc(node)}</div>
             </div>"""
             if i < len(nodes) - 1:
                 nodes_html += f"""<div class="arrow-connector" style="animation-delay: {delay + 0.2}s"><span>▼ FLUJO DE ATAQUE ▼</span></div>"""
         return f'<div class="diagram-container">{nodes_html}</div>'
 
     if scene_type == "map":
-        nodes = (diagram_nodes + ["Origen", "Relay", "Objetivo"])[:3]
+        nodes = (list(diagram_nodes) + ["Origen", "Relay", "Objetivo"])[:3]
         return f"""
         <div class="map-stage">
             <div class="map-grid"></div>
             <div class="arc arc1"></div><div class="arc arc2"></div>
-            <div class="map-node n1"><span class="ping"></span><label>{nodes[0]}</label></div>
-            <div class="map-node n2"><span class="ping"></span><label>{nodes[1]}</label></div>
-            <div class="map-node n3"><span class="ping danger"></span><label>{nodes[2]}</label></div>
+            <div class="map-node n1"><span class="ping"></span><label>{_esc(nodes[0])}</label></div>
+            <div class="map-node n2"><span class="ping"></span><label>{_esc(nodes[1])}</label></div>
+            <div class="map-node n3"><span class="ping danger"></span><label>{_esc(nodes[2])}</label></div>
             <div class="packet p1"></div><div class="packet p2"></div>
         </div>"""
 
@@ -99,8 +106,8 @@ def _center_content(scene: Dict[str, Any]) -> str:
         label = scene.get("stat_label") or scene.get("code_snippet") or "Impacto del ataque"
         return f"""
         <div class="stat-wrap">
-            <div class="stat-value" id="statv">{value}</div>
-            <div class="stat-label">{label}</div>
+            <div class="stat-value" id="statv">{_esc(value)}</div>
+            <div class="stat-label">{_esc(label)}</div>
             <div class="stat-glow"></div>
         </div>"""
 
@@ -112,7 +119,7 @@ def _center_content(scene: Dict[str, Any]) -> str:
             <div class="tl-row" style="animation-delay:{i*0.35}s">
                 <div class="tl-dot"></div>
                 <div class="tl-time">T+{i}</div>
-                <div class="tl-text">{s}</div>
+                <div class="tl-text">{_esc(s)}</div>
             </div>"""
         return f'<div class="timeline"><div class="tl-line"></div>{rows}</div>'
 
@@ -121,14 +128,14 @@ def _center_content(scene: Dict[str, Any]) -> str:
         return f"""
         <div class="brand-stage">
             <div class="brand-ring"></div>
-            <div class="brand-sub">{sub}</div>
+            <div class="brand-sub">{_esc(sub)}</div>
         </div>"""
 
     # evidence (por defecto)
     return f"""
     <div class="evidence-card">
         <div class="evidence-header"><span class="rec-dot">●</span> EVIDENCIA TÉCNICA VERIFICADA</div>
-        <pre class="code-box">{code_snippet}</pre>
+        <pre class="code-box">{_esc(code_snippet)}</pre>
         <div class="scan-bar"></div>
     </div>"""
 
@@ -142,9 +149,9 @@ def generate_scene_html(
 ) -> str:
     """Genera una página HTML5/CSS3/JS animada a 1080x1920 para la escena (con Ken-Burns y barra de progreso)."""
     t = get_theme(theme)
-    scene_id = scene.get("id", 1)
-    headline = scene.get("headline", "ANÁLISIS FORENSE")
-    badge = scene.get("badge", "CYBERSECURITY INTEL")
+    scene_id = int(scene.get("id", 1) or 1)
+    headline = _esc(scene.get("headline", "ANÁLISIS FORENSE"))
+    badge = _esc(scene.get("badge", "CYBERSECURITY INTEL"))
     center = _center_content(scene)
 
     dur = float(scene.get("duration", 5.0)) or 5.0
@@ -244,56 +251,87 @@ def generate_scene_html(
     {extra_body}
     <div class="cyber-grid"></div>
     <div class="hud-wrapper">
-        <div class="top-bar"><span class="badge">{badge}</span><span class="scene-counter">SEC_LOG // 0{scene_id}_0{total_scenes}</span></div>
+        <div class="top-bar"><span class="badge">{badge}</span><span class="scene-counter">SEC_LOG // {scene_id:02d}_{total_scenes:02d}</span></div>
         <div class="headline">{headline}</div>
         {center}
     </div>
 </body></html>"""
 
 
-async def render_scene_video_playwright(html_path: Path, duration_sec: float, out_mp4: Path) -> None:
-    """Graba la animación HTML en Chromium headless y la normaliza a MP4 30fps con FFmpeg (con fade in/out)."""
-    from playwright.async_api import async_playwright
-
-    temp_video_dir = out_mp4.parent / f"pw_tmp_{out_mp4.stem}"
-    temp_video_dir.mkdir(parents=True, exist_ok=True)
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            viewport={"width": 1080, "height": 1920},
-            record_video_dir=str(temp_video_dir),
-            record_video_size={"width": 1080, "height": 1920},
-        )
+async def _record_with_browser(browser: Any, html_path: Path, duration_sec: float, temp_video_dir: Path) -> None:
+    context = await browser.new_context(
+        viewport={"width": 1080, "height": 1920},
+        record_video_dir=str(temp_video_dir),
+        record_video_size={"width": 1080, "height": 1920},
+    )
+    try:
         page = await context.new_page()
         await page.goto(html_path.resolve().as_uri())
         await page.wait_for_timeout(int(duration_sec * 1000) + 250)
+    finally:
         await context.close()
-        await browser.close()
-
-    recorded_files = list(temp_video_dir.glob("*.webm"))
-    if not recorded_files:
-        raise RuntimeError(f"Playwright no generó el video para {html_path.name}")
-
-    fade_out = max(0.0, duration_sec - 0.35)
-    vf = (f"fps=30,scale=1080:1920,format=yuv420p,"
-          f"fade=t=in:st=0:d=0.3,fade=t=out:st={fade_out:.2f}:d=0.35")
-    cmd = [
-        settings.ffmpeg or "ffmpeg", "-y", "-i", str(recorded_files[0]),
-        "-t", f"{duration_sec:.3f}", "-vf", vf,
-        "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-an", str(out_mp4),
-    ]
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    shutil.rmtree(temp_video_dir, ignore_errors=True)
 
 
-async def generate_youtube_thumbnail(title: str, out_jpg: Path, theme: Optional[str] = None,
-                                     subtitle: str = "CASO REAL") -> Optional[Path]:
+async def render_scene_video_playwright(
+    html_path: Path,
+    duration_sec: float,
+    out_mp4: Path,
+    browser: Any = None,
+) -> None:
+    """
+    Graba la animación HTML en Chromium headless y la normaliza a MP4 30fps con FFmpeg.
+    Si se pasa `browser`, lo reutiliza en lugar de lanzar una nueva instancia por escena.
+    """
+    temp_video_dir = out_mp4.parent / f"pw_tmp_{out_mp4.stem}"
+    temp_video_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if browser is not None:
+            await _record_with_browser(browser, html_path, duration_sec, temp_video_dir)
+        else:
+            from playwright.async_api import async_playwright
+
+            async with async_playwright() as p:
+                owned_browser = await p.chromium.launch(headless=True)
+                try:
+                    await _record_with_browser(owned_browser, html_path, duration_sec, temp_video_dir)
+                finally:
+                    await owned_browser.close()
+
+        recorded_files = list(temp_video_dir.glob("*.webm"))
+        if not recorded_files:
+            raise RuntimeError(f"Playwright no generó el video para {html_path.name}")
+
+        fade_out = max(0.0, duration_sec - 0.35)
+        vf = (f"fps=30,scale=1080:1920,format=yuv420p,"
+              f"fade=t=in:st=0:d=0.3,fade=t=out:st={fade_out:.2f}:d=0.35")
+        cmd = [
+            settings.ffmpeg or "ffmpeg", "-y", "-i", str(recorded_files[0]),
+            "-t", f"{duration_sec:.3f}", "-vf", vf,
+            "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-an", str(out_mp4),
+        ]
+        proc = await asyncio.to_thread(
+            subprocess.run, cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
+        )
+        if proc.returncode != 0:
+            tail = "\n".join((proc.stderr or "").splitlines()[-10:])
+            raise RuntimeError(f"FFmpeg falló normalizando {html_path.name}:\n{tail}")
+    finally:
+        shutil.rmtree(temp_video_dir, ignore_errors=True)
+
+
+async def generate_youtube_thumbnail(
+    title: str,
+    out_jpg: Path,
+    theme: Optional[str] = None,
+    subtitle: str = "CASO REAL",
+    browser: Any = None,
+) -> Optional[Path]:
     """Genera una miniatura 1280x720 estilo YouTube con el gancho del video."""
-    from playwright.async_api import async_playwright
-
     t = get_theme(theme)
-    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+    safe_sub = _esc(subtitle)
+    safe_title = _esc((title or "")[:70])
+    thumb_html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
     *{{margin:0;box-sizing:border-box}}
     body{{width:1280px;height:720px;overflow:hidden;position:relative;
         background:radial-gradient(circle at 30% 30%,#0c192c,#050811 70%,#020307);
@@ -305,21 +343,35 @@ async def generate_youtube_thumbnail(title: str, out_jpg: Path, theme: Optional[
     .bar{{position:absolute;left:0;bottom:0;height:16px;width:100%;background:linear-gradient(90deg,{t['a']},{t['p']})}}
     </style></head><body>
     <div class="grid"></div>
-    <div class="tag">{subtitle}</div>
-    <div class="title">{title[:70]}</div>
+    <div class="tag">{safe_sub}</div>
+    <div class="title">{safe_title}</div>
     <div class="bar"></div>
     </body></html>"""
     html_file = out_jpg.parent / f"thumb_yt_{out_jpg.stem}.html"
-    html_file.write_text(html, encoding="utf-8")
+    html_file.write_text(thumb_html, encoding="utf-8")
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page(viewport={"width": 1280, "height": 720})
-            await page.goto(html_file.resolve().as_uri())
-            await page.wait_for_timeout(400)
-            await page.screenshot(path=str(out_jpg), type="jpeg", quality=90)
-            await browser.close()
-        html_file.unlink(missing_ok=True)
+        async def _capture(br: Any) -> None:
+            page = await br.new_page(viewport={"width": 1280, "height": 720})
+            try:
+                await page.goto(html_file.resolve().as_uri())
+                await page.wait_for_timeout(400)
+                await page.screenshot(path=str(out_jpg), type="jpeg", quality=90)
+            finally:
+                await page.close()
+
+        if browser is not None:
+            await _capture(browser)
+        else:
+            from playwright.async_api import async_playwright
+
+            async with async_playwright() as p:
+                owned_browser = await p.chromium.launch(headless=True)
+                try:
+                    await _capture(owned_browser)
+                finally:
+                    await owned_browser.close()
         return out_jpg if out_jpg.exists() else None
     except Exception:  # noqa: BLE001
         return None
+    finally:
+        html_file.unlink(missing_ok=True)

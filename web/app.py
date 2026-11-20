@@ -9,6 +9,7 @@ import re
 import shutil
 import unicodedata
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -18,6 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 from config.settings import settings
 from core import llm, scheduler, store
@@ -29,14 +31,85 @@ from uploaders import tiktok, youtube
 
 BASE = Path(__file__).resolve().parent
 ASSETS_DIR = settings.project_root / "assets"
-ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+MUSIC_DIR = ASSETS_DIR / "music"
+LOGOS_DIR = ASSETS_DIR / "logos"
+PREVIEWS_DIR = ASSETS_DIR / "previews"
+for _d in (ASSETS_DIR, MUSIC_DIR, LOGOS_DIR, PREVIEWS_DIR):
+    _d.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Cybercrime Studio")
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    scheduler.start()
+    yield
+
+
+app = FastAPI(title="Cybercrime Studio", lifespan=_lifespan)
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 
 JOBS: Dict[str, Dict[str, Any]] = {}
-ASSETS: Dict[str, str] = {}  # id -> ruta de archivo subido (música / logo)
+MAX_JOBS = 50
+ASSETS: Dict[str, str] = {}  # id -> ruta de archivo subido (caché en memoria + resolución en disco)
+
+
+def _prune_jobs() -> None:
+    """Evita crecimiento ilimitado de JOBS en memoria manteniendo los últimos MAX_JOBS."""
+    if len(JOBS) <= MAX_JOBS:
+        return
+    removable = [jid for jid, j in JOBS.items() if j.get("status") in ("done", "error")]
+    for jid in removable[: max(0, len(JOBS) - MAX_JOBS)]:
+        JOBS.pop(jid, None)
+
+
+def _cleanup_files(*paths: Path) -> None:
+    for p in paths:
+        try:
+            p.unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _safe_filename(name: str, fallback: str) -> str:
+    clean = re.sub(r"[^a-zA-Z0-9._-]", "_", Path(name or fallback).name)
+    return clean[:80] or fallback
+
+
+def _list_persistent_assets() -> Dict[str, List[Dict[str, str]]]:
+    music: List[Dict[str, str]] = []
+    for p in sorted(MUSIC_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+        if p.is_file():
+            aid = f"music/{p.name}"
+            ASSETS[aid] = str(p)
+            music.append({"id": aid, "name": p.name})
+
+    logos: List[Dict[str, str]] = []
+    brand_logo = settings.project_root / "branding" / "logo_perfil_1024.png"
+    if brand_logo.exists():
+        ASSETS["brand:logo"] = str(brand_logo)
+        logos.append({"id": "brand:logo", "name": f"Logo {settings.brand_name} (marca)"})
+    for p in sorted(LOGOS_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+        if p.is_file():
+            aid = f"logos/{p.name}"
+            ASSETS[aid] = str(p)
+            logos.append({"id": aid, "name": p.name})
+    return {"music": music, "logos": logos}
+
+
+def _resolve_asset(asset_id: Optional[str]) -> Optional[str]:
+    if not asset_id:
+        return None
+    if asset_id in ASSETS and Path(ASSETS[asset_id]).exists():
+        return ASSETS[asset_id]
+    if asset_id == "brand:logo":
+        p = settings.project_root / "branding" / "logo_perfil_1024.png"
+        return str(p) if p.exists() else None
+    if "/" in asset_id and ".." not in asset_id:
+        candidate = (ASSETS_DIR / asset_id).resolve()
+        if ASSETS_DIR.resolve() in candidate.parents and candidate.is_file():
+            ASSETS[asset_id] = str(candidate)
+            return str(candidate)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -81,16 +154,13 @@ class BatchRequest(BaseModel):
     music_mood: str = "dark"
     branding: bool = True
     style: str = "auto"
+    auto_upload_youtube: bool = False
+    auto_upload_tiktok: bool = False
 
 
 class UploadRequest(BaseModel):
     job_id: Optional[str] = None
     project: Optional[str] = None
-
-
-@app.on_event("startup")
-async def _startup():
-    scheduler.start()
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +176,7 @@ async def status():
     return {
         "ffmpeg_ready": settings.ffmpeg_ready(),
         "provider": settings.llm_provider,
+        "brand_name": settings.brand_name,
         "default_voice": settings.default_voice("es"),
         "themes": list(THEMES.keys()),
         "providers": {
@@ -117,6 +188,11 @@ async def status():
         "youtube": {"configured": youtube.is_configured(), "connected": youtube.is_connected()},
         "tiktok": {"configured": tiktok.is_configured(), "connected": tiktok.is_connected()},
     }
+
+
+@app.get("/api/assets")
+async def list_assets():
+    return _list_persistent_assets()
 
 
 @app.get("/api/opencode/models")
@@ -139,35 +215,36 @@ async def voice_preview(payload: Dict[str, Any]):
     rate = payload.get("rate", "+8%")
     pitch = payload.get("pitch", "-2Hz")
     text = payload.get("text") or "Esta es una muestra de la voz seleccionada para tu video."
-    out = ASSETS_DIR / f"preview_{uuid.uuid4().hex[:8]}.mp3"
+    out = PREVIEWS_DIR / f"preview_{uuid.uuid4().hex[:8]}.mp3"
     try:
         await synthesize_sample(voice, out, text=text, rate=rate, pitch=pitch)
-        return FileResponse(str(out), media_type="audio/mpeg")
+        return FileResponse(str(out), media_type="audio/mpeg", background=BackgroundTask(_cleanup_files, out))
     except Exception as exc:  # noqa: BLE001
+        _cleanup_files(out)
         return JSONResponse({"error": str(exc)}, status_code=400)
 
 
 # ---------------------------------------------------------------------------
-# Subida de recursos (música / logo)
+# Subida de recursos (música / logo persistentes)
 # ---------------------------------------------------------------------------
 @app.post("/api/upload/music")
 async def upload_music(file: UploadFile = File(...)):
-    aid = uuid.uuid4().hex[:10]
-    ext = Path(file.filename or "music.mp3").suffix or ".mp3"
-    dest = ASSETS_DIR / f"music_{aid}{ext}"
+    safe_name = _safe_filename(file.filename or "music.mp3", "music.mp3")
+    dest = MUSIC_DIR / f"{uuid.uuid4().hex[:6]}_{safe_name}"
     dest.write_bytes(await file.read())
+    aid = f"music/{dest.name}"
     ASSETS[aid] = str(dest)
-    return {"id": aid, "name": file.filename}
+    return {"id": aid, "name": dest.name}
 
 
 @app.post("/api/upload/logo")
 async def upload_logo(file: UploadFile = File(...)):
-    aid = uuid.uuid4().hex[:10]
-    ext = Path(file.filename or "logo.png").suffix or ".png"
-    dest = ASSETS_DIR / f"logo_{aid}{ext}"
+    safe_name = _safe_filename(file.filename or "logo.png", "logo.png")
+    dest = LOGOS_DIR / f"{uuid.uuid4().hex[:6]}_{safe_name}"
     dest.write_bytes(await file.read())
+    aid = f"logos/{dest.name}"
     ASSETS[aid] = str(dest)
-    return {"id": aid, "name": file.filename}
+    return {"id": aid, "name": dest.name}
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +276,7 @@ async def script_generate(req: ScriptRequest):
 # ---------------------------------------------------------------------------
 @app.post("/api/render")
 async def render(req: RenderRequest):
+    _prune_jobs()
     job_id = uuid.uuid4().hex[:12]
     job = {"id": job_id, "status": "running", "pct": 0, "stage": "inicio",
            "log": [], "result": None, "error": None, "queue": asyncio.Queue()}
@@ -210,8 +288,8 @@ async def render(req: RenderRequest):
         job["log"].append(entry)
         await job["queue"].put(entry)
 
-    music_path = ASSETS.get(req.music_id) if req.music_id else None
-    logo_path = ASSETS.get(req.logo_id) if req.logo_id else None
+    music_path = _resolve_asset(req.music_id)
+    logo_path = _resolve_asset(req.logo_id)
 
     async def worker():
         try:
@@ -245,6 +323,8 @@ async def ws_progress(websocket: WebSocket, job_id: str):
         await websocket.send_json({"pct": job["pct"], "stage": job["status"],
                                    "message": "FIN", "result": job.get("result"),
                                    "error": job["status"] == "error"})
+        await websocket.close()
+        return
     try:
         while True:
             entry = await job["queue"].get()
@@ -277,8 +357,21 @@ async def download(job_id: str):
 # ---------------------------------------------------------------------------
 # Biblioteca
 # ---------------------------------------------------------------------------
+def _safe_project_dir(project: str) -> Optional[Path]:
+    """Valida que `project` sea una carpeta cyber_video_* dentro de output_dir (anti path-traversal)."""
+    if not project or not project.startswith("cyber_video_") or "/" in project or "\\" in project or ".." in project:
+        return None
+    target = (settings.output_dir / project).resolve()
+    if settings.output_dir.resolve() not in target.parents:
+        return None
+    return target
+
+
 def _load_project_plan(project: str) -> Optional[Dict[str, Any]]:
-    plan_file = settings.output_dir / project / "video_plan.json"
+    pdir = _safe_project_dir(project)
+    if not pdir:
+        return None
+    plan_file = pdir / "video_plan.json"
     if plan_file.exists():
         try:
             return json.loads(plan_file.read_text(encoding="utf-8"))
@@ -347,7 +440,10 @@ async def library():
 
 @app.get("/thumb_yt/{project}")
 async def thumb_yt(project: str):
-    p = settings.output_dir / project / "thumb_youtube.jpg"
+    pdir = _safe_project_dir(project)
+    if not pdir:
+        return JSONResponse({"error": "proyecto inválido"}, status_code=400)
+    p = pdir / "thumb_youtube.jpg"
     if not p.exists():
         return JSONResponse({"error": "sin miniatura"}, status_code=404)
     return FileResponse(str(p), media_type="image/jpeg")
@@ -358,6 +454,7 @@ async def thumb_yt(project: str):
 # ---------------------------------------------------------------------------
 @app.post("/api/batch")
 async def batch(req: BatchRequest):
+    _prune_jobs()
     job_id = uuid.uuid4().hex[:12]
     job = {"id": job_id, "status": "running", "pct": 0, "stage": "lote",
            "log": [], "result": None, "error": None, "queue": asyncio.Queue()}
@@ -374,7 +471,9 @@ async def batch(req: BatchRequest):
             results = await run_batch(
                 count=req.count, source=req.source, lang=req.lang, provider=req.provider,
                 model=req.model, theme=req.theme, voice=req.voice, rate=req.rate, pitch=req.pitch,
-                music_mood=req.music_mood, branding=req.branding, style=req.style, progress=progress,
+                music_mood=req.music_mood, branding=req.branding, style=req.style,
+                auto_upload_youtube=req.auto_upload_youtube, auto_upload_tiktok=req.auto_upload_tiktok,
+                progress=progress,
             )
             job["result"], job["status"] = {"videos": results}, "done"
             await job["queue"].put({"pct": 100, "stage": "done", "message": "FIN", "result": {"videos": results}})
@@ -388,7 +487,7 @@ async def batch(req: BatchRequest):
 
 @app.get("/api/topics")
 async def topics_list():
-    return {"topics": store.load_topics()}
+    return {"topics": store.load_topics(), "history_count": len(store.load_history())}
 
 
 @app.post("/api/topics")
@@ -416,32 +515,35 @@ async def scene_preview(payload: Dict[str, Any]):
     """Renderiza SOLO una escena (sin audio, ~4.5s) para previsualizar su aspecto."""
     scene = payload.get("scene") or {}
     theme = payload.get("theme") or "verde"
+    html_file = PREVIEWS_DIR / f"scene_prev_{uuid.uuid4().hex[:8]}.html"
+    mp4_file = PREVIEWS_DIR / f"scene_prev_{uuid.uuid4().hex[:8]}.mp4"
     try:
-        html = generate_scene_html(scene, total_scenes=1, theme=theme)
-        html_file = ASSETS_DIR / f"scene_prev_{uuid.uuid4().hex[:8]}.html"
-        mp4_file = ASSETS_DIR / f"scene_prev_{uuid.uuid4().hex[:8]}.mp4"
-        html_file.write_text(html, encoding="utf-8")
+        html_doc = generate_scene_html(scene, total_scenes=1, theme=theme)
+        html_file.write_text(html_doc, encoding="utf-8")
         await render_scene_video_playwright(html_file, 4.5, mp4_file)
-        return FileResponse(str(mp4_file), media_type="video/mp4")
+        _cleanup_files(html_file)
+        return FileResponse(str(mp4_file), media_type="video/mp4", background=BackgroundTask(_cleanup_files, mp4_file))
     except Exception as exc:  # noqa: BLE001
+        _cleanup_files(html_file, mp4_file)
         return JSONResponse({"error": str(exc)}, status_code=400)
 
 
 @app.delete("/api/library/{project}")
 async def library_delete(project: str):
     """Borra un video de la biblioteca (solo carpetas cyber_video_* dentro de output)."""
-    if not project.startswith("cyber_video_") or "/" in project or "\\" in project or ".." in project:
+    target = _safe_project_dir(project)
+    if not target:
         return JSONResponse({"error": "proyecto inválido"}, status_code=400)
-    target = (settings.output_dir / project).resolve()
-    if settings.output_dir.resolve() not in target.parents:
-        return JSONResponse({"error": "ruta fuera de la biblioteca"}, status_code=400)
     shutil.rmtree(target, ignore_errors=True)
     return {"status": "deleted", "project": project}
 
 
 @app.get("/thumb/{project}")
 async def thumb(project: str):
-    p = settings.output_dir / project / "thumb.jpg"
+    pdir = _safe_project_dir(project)
+    if not pdir:
+        return JSONResponse({"error": "proyecto inválido"}, status_code=400)
+    p = pdir / "thumb.jpg"
     if not p.exists():
         return JSONResponse({"error": "sin miniatura"}, status_code=404)
     return FileResponse(str(p), media_type="image/jpeg")
@@ -449,7 +551,10 @@ async def thumb(project: str):
 
 @app.get("/library/video/{project}")
 async def library_video(project: str):
-    p = settings.output_dir / project / "video_final.mp4"
+    pdir = _safe_project_dir(project)
+    if not pdir:
+        return JSONResponse({"error": "proyecto inválido"}, status_code=400)
+    p = pdir / "video_final.mp4"
     if not p.exists():
         return JSONResponse({"error": "no existe"}, status_code=404)
     return FileResponse(str(p), media_type="video/mp4")
@@ -458,17 +563,25 @@ async def library_video(project: str):
 # ---------------------------------------------------------------------------
 # Cuentas y subida
 # ---------------------------------------------------------------------------
-def _resolve_upload(req: UploadRequest) -> Optional[Dict[str, str]]:
+def _resolve_upload(req: UploadRequest) -> Optional[Dict[str, Any]]:
     if req.job_id:
         job = JOBS.get(req.job_id)
         if job and job.get("result"):
             return job["result"]
     if req.project:
+        pdir = _safe_project_dir(req.project)
+        if not pdir:
+            return None
         plan = _load_project_plan(req.project) or {}
-        mp4 = settings.output_dir / req.project / "video_final.mp4"
+        mp4 = pdir / "video_final.mp4"
+        thumb_yt_path = pdir / "thumb_youtube.jpg"
         if mp4.exists():
-            return {"mp4": str(mp4), "title": plan.get("title", req.project),
-                    "description": plan.get("description", "")}
+            return {
+                "mp4": str(mp4),
+                "title": plan.get("title", req.project),
+                "description": plan.get("description", ""),
+                "thumb_youtube": str(thumb_yt_path) if thumb_yt_path.exists() else None,
+            }
     return None
 
 
@@ -487,7 +600,9 @@ async def upload_youtube(req: UploadRequest):
     if not r:
         return JSONResponse({"error": "video no disponible"}, status_code=404)
     try:
-        return await asyncio.to_thread(youtube.upload, r["mp4"], r["title"], r["description"])
+        return await asyncio.to_thread(
+            youtube.upload, r["mp4"], r["title"], r["description"], None, None, r.get("thumb_youtube")
+        )
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"error": str(exc)}, status_code=400)
 
@@ -503,6 +618,8 @@ async def tiktok_connect(request: Request):
 
 @app.get("/auth/tiktok/callback")
 async def tiktok_callback(request: Request, code: str = "", state: str = ""):
+    if not tiktok.verify_state(state):
+        return JSONResponse({"error": "parámetro state inválido o expirado (reintenta conectar TikTok)"}, status_code=400)
     redirect_uri = str(request.base_url).rstrip("/") + "/auth/tiktok/callback"
     try:
         tiktok.exchange_code(code, redirect_uri)

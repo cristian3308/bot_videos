@@ -100,17 +100,21 @@
 
         <details class="adv">
             <summary>🎵 Música y logo (opcional)</summary>
-            <label>Mood de música (si no subes archivo propio)</label>
+            <label>Mood de música (si no eliges archivo propio)</label>
             <select id="music_mood">
                 <option value="dark">Dark (oscuro)</option>
                 <option value="tense">Tense (tensión)</option>
                 <option value="action">Action (acción)</option>
                 <option value="suspense">Suspense</option>
             </select>
-            <label>Música de fondo propia (con ducking automático)</label>
+            <label>Música guardada (con ducking automático)</label>
+            <select id="music-saved"><option value="">(ninguna — usar mood procedural)</option></select>
+            <label>Subir nueva música</label>
             <input type="file" id="music" accept="audio/*">
             <small id="music-name" class="hint"></small>
-            <label>Logo (PNG, esquina superior)</label>
+            <label>Logo guardado (esquina superior)</label>
+            <select id="logo-saved"><option value="">(ninguno)</option></select>
+            <label>Subir nuevo logo (PNG)</label>
             <input type="file" id="logo" accept="image/png,image/*">
             <small id="logo-name" class="hint"></small>
         </details>
@@ -131,19 +135,36 @@
 
     <!-- Guion + Resultado -->
     <section class="card">
-        <h2>Guion <span id="script-title" class="hint"></span></h2>
+        <div class="card-head">
+            <h2>Guion <span id="script-title" class="hint"></span></h2>
+            <div class="mode-switch hidden" id="editor-switch">
+                <button class="mini active" id="mode-visual" type="button">Visual</button>
+                <button class="mini" id="mode-json" type="button">JSON</button>
+            </div>
+        </div>
         <div id="script-box" class="hidden">
-            <textarea id="plan-json" rows="12" class="mono" spellcheck="false"></textarea>
+            <div id="visual-editor" class="visual-editor">
+                <label>Título del video</label>
+                <input type="text" id="ed-title">
+                <label>Descripción / Hashtags</label>
+                <textarea id="ed-desc" rows="2"></textarea>
+                <div class="scenes-bar">
+                    <span class="hint" id="ed-stats"></span>
+                    <button class="ghost mini" id="btn-add-scene" type="button">+ Escena</button>
+                </div>
+                <div id="ed-scenes" class="scene-list"></div>
+            </div>
+            <textarea id="plan-json" rows="14" class="mono hidden" spellcheck="false"></textarea>
             <div class="row">
-                <button class="ghost" id="btn-regen">⟳ Regenerar</button>
-                <button class="ghost" id="btn-preview-scene">👁 Previsualizar escena 1</button>
+                <button class="ghost" id="btn-regen" type="button">⟳ Regenerar</button>
+                <button class="ghost" id="btn-preview-scene" type="button">👁 Previsualizar escena 1</button>
             </div>
             <div class="row">
-                <button class="primary sm" id="btn-render">2 · RENDERIZAR VIDEO ▶</button>
+                <button class="primary sm" id="btn-render" type="button">2 · RENDERIZAR VIDEO ▶</button>
             </div>
             <video id="scene-preview" controls playsinline class="hidden" style="width:100%;max-height:300px;border-radius:10px;margin-top:10px;background:#000"></video>
         </div>
-        <p id="script-empty" class="hint">Genera el guion a la izquierda; aquí podrás editarlo antes de renderizar.</p>
+        <p id="script-empty" class="hint">Genera el guion a la izquierda; aquí podrás editar cada escena visualmente antes de renderizar.</p>
 
         <div class="progress-wrap">
             <div class="bar"><div id="bar-fill"></div></div><span id="pct">0%</span>
@@ -180,7 +201,7 @@
 <main id="tab-automatizar" class="grid hidden">
     <section class="card">
         <h2>⚡ Generar en lote</h2>
-        <p class="hint">Crea varios videos seguidos usando la configuración de la pestaña "Crear" (voz, tema, modelo, mood...).</p>
+        <p class="hint">Crea varios videos seguidos sin repetir noticias/temas ya producidos, rotando estilos.</p>
         <div class="two">
             <div>
                 <label>Cuántos videos</label>
@@ -194,13 +215,17 @@
                 </select>
             </div>
         </div>
+        <div class="row">
+            <label class="chk"><input type="checkbox" id="batch_auto_yt"> Auto-subir a YouTube</label>
+            <label class="chk"><input type="checkbox" id="batch_auto_tt"> Auto-subir a TikTok</label>
+        </div>
         <button class="primary" id="btn-batch">▶ GENERAR LOTE</button>
         <div class="progress-wrap"><div class="bar"><div id="batch-fill"></div></div><span id="batch-pct">0%</span></div>
         <pre id="batch-log" class="log"></pre>
     </section>
 
     <section class="card">
-        <h2>📋 Banco de temas</h2>
+        <h2>📋 Banco de temas <span id="history-badge" class="hint"></span></h2>
         <div class="row">
             <input type="text" id="topic-new" placeholder="Ej: El hackeo a Sony Pictures de 2014">
             <button class="ghost" id="btn-topic-add">+ Añadir</button>
@@ -216,6 +241,10 @@
         <div class="two">
             <div><label>Videos por día</label><input type="number" id="sch_count" min="1" max="10" value="1"></div>
             <div><label>Origen</label><select id="sch_source"><option value="news">Noticias</option><option value="bank">Banco de temas</option></select></div>
+        </div>
+        <div class="row">
+            <label class="chk"><input type="checkbox" id="sch_auto_yt"> Auto-subir a YouTube</label>
+            <label class="chk"><input type="checkbox" id="sch_auto_tt"> Auto-subir a TikTok</label>
         </div>
         <button class="primary sm" id="btn-sch-save" style="margin-top:14px">Guardar programación</button>
         <p class="hint">El programador funciona mientras el panel (run.py) esté abierto. Para 24/7, usa el Dockerfile.</p>

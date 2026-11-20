@@ -77,8 +77,9 @@ def upload(
     description: str,
     tags: Optional[List[str]] = None,
     privacy: Optional[str] = None,
+    thumbnail_path: Optional[str] = None,
 ) -> Dict[str, str]:
-    """Sube el video a YouTube y devuelve {'video_id', 'url'}."""
+    """Sube el video a YouTube (y opcionalmente su miniatura) y devuelve {'video_id', 'url'}."""
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
 
@@ -105,4 +106,17 @@ def upload(
         _status, response = request.next_chunk()
 
     video_id = response["id"]
-    return {"video_id": video_id, "url": f"https://youtu.be/{video_id}"}
+    thumb_note = ""
+    if thumbnail_path and Path(thumbnail_path).exists():
+        try:
+            thumb_media = MediaFileUpload(thumbnail_path, mimetype="image/jpeg")
+            youtube.thumbnails().set(videoId=video_id, media_body=thumb_media).execute()
+            thumb_note = "ok"
+        except Exception as exc:  # noqa: BLE001
+            # Canales sin verificación telefónica o Shorts pueden rechazar miniaturas custom
+            thumb_note = f"omitida ({exc})"
+
+    out = {"video_id": video_id, "url": f"https://youtu.be/{video_id}"}
+    if thumb_note:
+        out["thumbnail"] = thumb_note
+    return out
